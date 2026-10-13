@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DirectUV: Image-Conditioned UV Texture Generation with Surface-Aware Positional Encoding</title>
+  <meta name="description" content="DirectUV generates UV textures directly in latent UV space from a single image. Surface-Aware Positional Encoding lets attention follow the mesh surface instead of the UV grid, keeping textures coherent across seams and UV islands.">
+  <meta name="keywords" content="DirectUV, UV texture generation, texture diffusion, positional encoding, SAPE, 3D generation, NeurIPS 2026">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="DirectUV: Image-Conditioned UV Texture Generation with Surface-Aware Positional Encoding">
+  <meta property="og:description" content="One image + one mesh → a complete UV texture, generated directly in UV space with attention that follows the surface.">
+  <meta property="og:image" content="static/images/poster.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1220'/%3E%3Cpath d='M8 9v8a8 8 0 0 0 16 0V9' fill='none' stroke='%23f2a33a' stroke-width='3.6' stroke-linecap='round'/%3E%3C/svg%3E">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:ital,wght@0,400..700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="static/css/style.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar" id="top">
+  <a class="topbar__mark" href="#top">Direct<span>UV</span></a>
+  <nav class="topbar__nav" aria-label="Sections">
+    <a href="#video">Video</a>
+    <a href="#abstract">Abstract</a>
+    <a href="#method">Method</a>
+    <a href="#results">Results</a>
+    <a href="#ablation">Ablation</a>
+    <a href="#more">More</a>
+    <a href="#bibtex">BibTeX</a>
+  </nav>
+</header>
+
+<main id="main">
+
+  <!-- ───────────── Hero ───────────── -->
+  <section class="hero">
+    <div class="wrap">
+      <p class="venue">NeurIPS 2026</p>
+      <h1 class="hero__title">Direct<span>UV</span></h1>
+      <p class="hero__sub">Image-Conditioned UV Texture Generation with Surface-Aware Positional Encoding</p>
+
+      <div class="hero__meta">
+        <div class="people">
+          <p class="people__names">
+            <span>Jiantao Lin<sup>1,*</sup></span>
+            <span>Yingjie Xu<sup>1,3,*</sup></span>
+            <span>Mingzhi Sheng<sup>1</sup></span>
+            <span>Yangkai Wei<sup>3</sup></span>
+            <span>Hao Chen<sup>2</sup></span>
+            <span>Ying-Cong Chen<sup>1,2,†</sup></span>
+          </p>
+          <p class="people__aff">
+            <span><sup>1</sup>The Hong Kong University of Science and Technology (Guangzhou)</span>
+            <span><sup>2</sup>The Hong Kong University of Science and Technology</span>
+            <span><sup>3</sup>knowin.ai</span>
+          </p>
+          <p class="people__note"><sup>*</sup>Equal contribution &nbsp;·&nbsp; <sup>†</sup>Corresponding author</p>
+        </div>
+
+        <div class="links">
+          <a class="btn btn--solid" href="https://arxiv.org/abs/2609.34651" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/></svg>
+            Paper on arXiv
+          </a>
+          <a class="btn" href="https://arxiv.org/pdf/2609.34651" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg>
+            PDF
+          </a>
+          <a class="btn" href="#video">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>
+            Watch the video
+          </a>
+          <!-- Code: points back to this page for now; replace href with the repository URL once it is public. -->
+          <a class="btn" href="#top">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 8-4 4 4 4m8-8 4 4-4 4M13.5 5l-3 14"/></svg>
+            Code
+          </a>
+          <a class="btn" href="#bibtex">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7H6v4h3v2a3 3 0 0 1-3 3m12-9h-3v4h3v2a3 3 0 0 1-3 3"/></svg>
+            BibTeX
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Interactive: one neighbourhood, measured two ways -->
+    <div class="wrap">
+      <figure class="probe" id="probe">
+        <div class="probe__head">
+          <p class="eyebrow">The idea</p>
+          <h2 class="probe__q">A UV seam cuts a neighbourhood in two. Only one of these encodings can put it back together.</h2>
+          <p class="probe__lead">Below, a mesh is unwrapped into four UV islands. Pick a texel next to a seam: its neighbours on the surface end up on a different island, at the other end of the UV map. Whether attention can still relate them depends on how position is measured.</p>
+        </div>
+
+        <div class="probe__row" data-mode="grid">
+          <div class="probe__side">
+            <p class="probe__tag">Standard DiT</p>
+            <h3>2D-grid positional encoding</h3>
+            <p class="probe__say" data-say></p>
+            <p class="probe__stat"><b data-num></b><span>surface neighbours it can attend to</span></p>
+          </div>
+          <div class="probe__pane">
+            <canvas data-atlas aria-label="UV map with 2D-grid positional encoding: the attended neighbourhood stops at the island border."></canvas>
+            <p class="probe__label"><b>UV map</b> position = grid index</p>
+          </div>
+          <div class="probe__pane">
+            <canvas data-mesh aria-label="The same tokens on the mesh: the neighbourhood is cut off at the seam."></canvas>
+            <p class="probe__label"><b>On the mesh</b></p>
+          </div>
+        </div>
+
+        <div class="probe__row probe__row--ours" data-mode="surface">
+          <div class="probe__side">
+            <p class="probe__tag">Ours</p>
+            <h3>Surface-Aware Positional Encoding</h3>
+            <p class="probe__say" data-say></p>
+            <p class="probe__stat"><b data-num></b><span>surface neighbours it can attend to</span></p>
+          </div>
+          <div class="probe__pane">
+            <canvas data-atlas aria-label="UV map with SAPE: the attended neighbourhood continues on another island."></canvas>
+            <p class="probe__label"><b>UV map</b> position = 3D surface coordinate</p>
+          </div>
+          <div class="probe__pane">
+            <canvas data-mesh aria-label="The same tokens on the mesh: the neighbourhood is whole and crosses the seam."></canvas>
+            <p class="probe__label"><b>On the mesh</b></p>
+          </div>
+        </div>
+
+        <figcaption class="probe__foot">
+          <ul class="probe__legend">
+            <li><i class="sw sw--probe"></i>the texel being generated</li>
+            <li><i class="sw sw--hit"></i>texels it attends to as neighbours</li>
+            <li><i class="sw sw--miss"></i>neighbours on the surface that it cannot reach</li>
+            <li><i class="sw sw--seam"></i>UV seam</li>
+          </ul>
+          <p class="probe__hint">Move over any view to place the texel yourself. Schematic illustration on a torus, not model output: neighbours are the tokens within a fixed radius, measured in each encoding's own coordinates.</p>
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ───────────── Video ───────────── -->
+  <section class="band band--night" id="video">
+    <div class="wrap">
+      <div class="sec-head sec-head--row">
+        <h2>Video</h2>
+        <p>A five-minute narrated walkthrough of the problem, the method and the results.</p>
+      </div>
+      <div class="player">
+        <video controls preload="metadata" playsinline poster="static/images/poster.jpg">
+          <source src="static/videos/directuv_teaser.mp4" type="video/mp4">
+          Your browser cannot play this video. <a href="static/videos/directuv_teaser.mp4">Download the MP4</a>.
+        </video>
+      </div>
+    </div>
+  </section>
+
+  <div class="ccm-rule" aria-hidden="true"></div>
+
+  <!-- ───────────── Abstract ───────────── -->
+  <section class="band" id="abstract">
+    <div class="wrap split">
+      <div class="sec-head">
+        <h2>Abstract</h2>
+      </div>
+      <div class="prose prose--lead">
+        <p>Generating high-quality UV textures for 3D meshes remains challenging. Multi-view projection pipelines suffer from occlusion and view inconsistency, and recent methods that generate textures directly in UV space still rely on auxiliary modules to supply 3D information, leaving the attention mechanism tied to UV-grid positions rather than to the underlying surface geometry. This mismatch limits coherence across seams and disconnected UV islands.</p>
+        <p>We propose <strong>DirectUV</strong>, an image-conditioned UV texture diffusion framework that operates in the latent UV space of a pretrained image VAE, in which a Diffusion Transformer denoises the UV latent given a single input image and a coarse UV map. At its core, <strong>Surface-Aware Positional Encoding (SAPE)</strong> replaces the standard 2D-grid positional encoding with encodings derived from per-token 3D surface coordinates obtained via UV-to-surface correspondence. As positional encodings define the distance metric that attention operates on, SAPE enables tokens to attend to each other based on true surface proximity rather than UV-grid distance, restoring coherence across seams and disconnected islands. A multi-level extension further assigns different attention heads to progressively finer subdivisions of the same latent UV patch, allowing the model to reason about surface structure at multiple granularities.</p>
+        <p>Experiments show that DirectUV produces sharper and more globally consistent textures than other baselines, with the largest improvements in occluded and view-unseen regions where projection-based methods leave gaps or stretched textures.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── Method ───────────── -->
+  <section class="band band--tint" id="method">
+    <div class="wrap">
+      <div class="sec-head sec-head--wide">
+        <h2>Method</h2>
+        <p>Positional encodings define the distance metric that attention is compelled to operate on. So instead of handing the model 3D geometry as one more condition it may or may not follow, DirectUV writes the surface into the positional encoding itself.</p>
+      </div>
+
+      <figure class="fig">
+        <button class="fig__zoom" type="button" data-zoom="static/images/pipeline.png" aria-label="Enlarge the pipeline figure">
+          <img src="static/images/pipeline.png" width="2400" height="1533" loading="lazy" alt="DirectUV training and inference pipeline.">
+        </button>
+        <figcaption><b>Pipeline.</b> <em>Training (top):</em> the reference image is encoded by CLIP into a pooled feature that drives AdaLN modulation, and by DINOv2 into patch tokens for the joint-attention stream. A coarse UV map is encoded by the frozen Flux VAE and channel-concatenated with the noisy UV latent. The Canonical Coordinate Map (CCM) supplies per-head RoPE coordinates for Multi-Level SAPE. <em>Inference (bottom):</em> an off-the-shelf multi-view generator produces views that are projected into a coarse UV map; Euler steps then denoise the UV latent, which the VAE decodes into the final texture.</figcaption>
+      </figure>
+
+      <div class="ideas">
+        <article class="idea">
+          <h3>Generate the UV map itself</h3>
+          <p>The UV map is the sole generation target, denoised in the latent space of a frozen Flux VAE. The reference image and the coarse UV map are conditioning signals only. Nothing is projected and then refined, so view-dependent artifacts have no path into the output.</p>
+        </article>
+        <article class="idea">
+          <h3>Rotate by surface coordinates</h3>
+          <p>SAPE reads each token's 3D surface coordinate from the CCM and uses it as the RoPE position. The query–key dot product then depends only on the offset between two points on the surface, so texels split across a seam attend to each other directly.</p>
+        </article>
+        <article class="idea">
+          <h3>One granularity per head</h3>
+          <p>Multi-Level SAPE subdivides the same latent patch into 1×1, 2×2 and 4×4 cells and gives each attention head exactly one cell. Coarse correspondence and sub-patch detail coexist on disjoint head slices, with no added parameters or modules.</p>
+        </article>
+      </div>
+
+      <figure class="fig fig--narrow">
+        <button class="fig__zoom" type="button" data-zoom="static/images/sape.png" aria-label="Enlarge the SAPE figure">
+          <img src="static/images/sape.png" width="2200" height="1199" loading="lazy" alt="Mechanism of SAPE and Multi-Level SAPE.">
+        </button>
+        <figcaption><b>SAPE and Multi-Level SAPE.</b> <em>Left:</em> tokens <i>i</i> and <i>j</i> are adjacent on the mesh but land on different UV islands. SAPE measures their attention distance on the surface, allowing direct interaction across the seam. <em>Right:</em> the CCM is read at <i>L</i> = 3 resolutions and assigned to the 24 heads in 4 groups of six: one level-0 head, one level-1 head and four level-2 heads per group.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ───────────── Results ───────────── -->
+  <section class="band" id="results">
+    <div class="wrap">
+      <div class="sec-head sec-head--wide">
+        <h2>Comparison</h2>
+        <p>All methods receive the same mesh and a single front-facing reference image. Renderings use identical lighting.</p>
+      </div>
+
+      <figure class="fig fig--bleed">
+        <button class="fig__zoom" type="button" data-zoom="static/images/comparison.jpg" aria-label="Enlarge the qualitative comparison">
+          <img src="static/images/comparison.jpg" width="3600" height="1456" loading="lazy" alt="Qualitative comparison of Hunyuan3D-2.1, FlexPainter, TEXGen, UniTEX and DirectUV on five objects.">
+        </button>
+      </figure>
+
+      <dl class="notes">
+        <div>
+          <dt>Finer detail</dt>
+          <dd>High-frequency patterns stay sharp. The line strokes on the number block survive where other methods blur or misalign them.</dd>
+        </div>
+        <div>
+          <dt>Occluded regions</dt>
+          <dd>Inside the well and the trash bin, where no camera sees clearly, DirectUV fills in coherent, plausible content.</dd>
+        </div>
+        <div>
+          <dt>Conflicting views</dt>
+          <dd>On the fan, UniTEX carries the back-cover texture onto the front blades. Denoising in UV space resolves the conflict and keeps the right appearance.</dd>
+        </div>
+      </dl>
+
+      <div class="tablecard">
+        <div class="tablecard__text">
+          <h3>Google Scanned Objects</h3>
+          <p>The full GSO set is disjoint from the training data, so it serves as an out-of-distribution test. Each textured mesh is rendered under albedo shading from viewpoints with full directional coverage, including top-down and bottom-up, and compared against ground truth.</p>
+          <p class="legend"><b>Bold</b> best &nbsp;·&nbsp; <u>underline</u> second best</p>
+        </div>
+        <div class="tablecard__scroll">
+          <table>
+            <thead>
+              <tr><th scope="col">Method</th><th scope="col">PSNR ↑</th><th scope="col">SSIM ↑</th><th scope="col">FID ↓</th><th scope="col">KID ↓</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">TEXGen</th><td>24.45</td><td>0.9417</td><td>44.09</td><td>34.32</td></tr>
+              <tr><th scope="row">FlexPainter</th><td>23.21</td><td>0.9463</td><td>47.04</td><td>39.25</td></tr>
+              <tr><th scope="row">Hunyuan3D-2.1</th><td><u>24.74</u></td><td>0.9450</td><td><u>39.872</u></td><td><u>33.34</u></td></tr>
+              <tr><th scope="row">UniTEX</th><td>24.23</td><td><u>0.9504</u></td><td>42.11</td><td>39.21</td></tr>
+              <tr class="ours"><th scope="row">DirectUV</th><td>25.13</td><td>0.9527</td><td>39.17</td><td>30.03</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── Ablation ───────────── -->
+  <section class="band band--tint" id="ablation">
+    <div class="wrap">
+      <div class="sec-head sec-head--wide">
+        <h2>Ablation</h2>
+        <p>What each part of the positional encoding buys, with the rest of the model held fixed.</p>
+      </div>
+
+      <div class="duo">
+        <figure class="fig">
+          <button class="fig__zoom" type="button" data-zoom="static/images/ablation.jpg" aria-label="Enlarge the ablation figure">
+            <img src="static/images/ablation.jpg" width="2000" height="1600" loading="lazy" alt="Qualitative ablation: without SAPE, SAPE without multi-level, and the full model.">
+          </button>
+        </figure>
+
+        <div class="duo__side">
+          <div class="tablecard tablecard--stack">
+            <div class="tablecard__scroll">
+              <table>
+                <thead>
+                  <tr><th scope="col">Variant</th><th scope="col">PSNR ↑</th><th scope="col">SSIM ↑</th><th scope="col">FID ↓</th><th scope="col">KID ↓</th></tr>
+                </thead>
+                <tbody>
+                  <tr><th scope="row">w/o SAPE</th><td>23.82</td><td>0.9376</td><td>58.42</td><td>72.36</td></tr>
+                  <tr><th scope="row">SAPE, single level</th><td><u>24.36</u></td><td><u>0.9462</u></td><td><u>40.86</u></td><td><u>36.74</u></td></tr>
+                  <tr class="ours"><th scope="row">Multi-Level SAPE</th><td>25.13</td><td>0.9527</td><td>39.17</td><td>30.03</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <dl class="notes notes--stack">
+            <div>
+              <dt>Without SAPE</dt>
+              <dd>With the standard 2D UV-grid RoPE, mesh-adjacent texels on different charts cannot interact. Appearance diverges between islands: on the chocobo, the black of the legs appears on the neck.</dd>
+            </div>
+            <div>
+              <dt>Without multiple levels</dt>
+              <dd>Tying every head to the level-0 coordinate keeps seams coherent but cannot tell sub-token positions apart, so detail inside each latent patch collapses into blur.</dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── More ───────────── -->
+  <section class="band" id="more">
+    <div class="wrap">
+      <div class="sec-head sec-head--wide">
+        <h2>More results</h2>
+        <p>Behaviour beyond the benchmark: imperfect conditioning, missing views, and meshes that come out of shape generators.</p>
+      </div>
+
+      <div class="stack">
+        <article class="case">
+          <div class="case__text">
+            <h3>The coarse UV map guides. It does not dictate.</h3>
+            <p>Here the coarse UV map paints the underside of the keyboard white. The reference image and the surrounding surface point to a continuous dark metal casing, and the final texture follows them rather than copying the coarse values.</p>
+          </div>
+          <figure class="fig">
+            <button class="fig__zoom" type="button" data-zoom="static/images/soft_prior.jpg" aria-label="Enlarge the keyboard example">
+              <img src="static/images/soft_prior.jpg" width="2400" height="628" loading="lazy" alt="Keyboard example: reference image, coarse UV with a white underside, and the final texture with a dark metallic underside.">
+            </button>
+          </figure>
+        </article>
+
+        <article class="case">
+          <div class="case__text">
+            <h3>Zero, one, two or four projected views</h3>
+            <p>During training the number of views behind the coarse UV map is sampled from {0, 1, 2, 4}. At inference the model stays plausible across all of them, including a completely blank coarse UV map, where it relies on the reference image and the surface-aware denoising alone.</p>
+          </div>
+          <figure class="fig">
+            <button class="fig__zoom" type="button" data-zoom="static/images/view_count.jpg" aria-label="Enlarge the view-count figure">
+              <img src="static/images/view_count.jpg" width="2400" height="1646" loading="lazy" alt="Textures generated with 0, 1, 2 and 4 projected views in the coarse UV map.">
+            </button>
+          </figure>
+        </article>
+
+        <article class="case">
+          <div class="case__text">
+            <h3>Meshes from image-to-3D generators</h3>
+            <p>Paired with shape generators such as Tripo and Rodin, DirectUV completes an image-to-textured-mesh pipeline: the generator produces the mesh, and DirectUV textures it from the same image, across the varied topologies and UV layouts these models output.</p>
+          </div>
+          <figure class="fig">
+            <button class="fig__zoom" type="button" data-zoom="static/images/in_the_wild.jpg" aria-label="Enlarge the generated-mesh results">
+              <img src="static/images/in_the_wild.jpg" width="2800" height="1289" loading="lazy" alt="Textures generated on meshes produced by image-to-3D shape generators.">
+            </button>
+          </figure>
+        </article>
+
+        <article class="case case--gallery">
+          <div class="case__text">
+            <h3>Gallery</h3>
+            <p>Additional results across object categories and mesh complexities.</p>
+          </div>
+          <figure class="fig fig--tall" id="gallery">
+            <button class="fig__zoom" type="button" data-zoom="static/images/more_results.jpg" aria-label="Enlarge the gallery">
+              <img src="static/images/more_results.jpg" width="2400" height="4043" loading="lazy" alt="Additional texture generation results.">
+            </button>
+            <button class="fig__more" type="button" aria-expanded="false" aria-controls="gallery">Show the full gallery</button>
+          </figure>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── Limitation ───────────── -->
+  <section class="band band--tint" id="limitation">
+    <div class="wrap split">
+      <div class="sec-head">
+        <h2>Limitation</h2>
+      </div>
+      <div>
+        <div class="prose">
+          <p>DirectUV depends on the quality of the UV parameterization. When a layout is shattered into many small slivers and corner patches, each token's surface coordinate averages over a large region per fragment, the CCM signal turns coarse, and the multi-level subdivision cannot fully recover local detail. The result is blur and colour leakage in those regions. UV-aware preprocessing or a tokenization learned for UV-space data are natural next steps.</p>
+        </div>
+        <figure class="fig">
+          <button class="fig__zoom" type="button" data-zoom="static/images/failure.jpg" aria-label="Enlarge the failure cases">
+            <img src="static/images/failure.jpg" width="2400" height="663" loading="lazy" alt="Failure cases on heavily fragmented UV layouts.">
+          </button>
+          <figcaption>Heavily fragmented UV layouts (top) lead to blurred or colour-leaked regions on the wrapped texture (bottom).</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── BibTeX ───────────── -->
+  <section class="band band--night" id="bibtex">
+    <div class="wrap split">
+      <div class="sec-head">
+        <h2>BibTeX</h2>
+        <p>If DirectUV is useful in your work, please cite the paper.</p>
+      </div>
+      <div class="bib">
+        <button class="bib__copy" type="button" id="copy-bib">Copy</button>
+<pre id="bib"><code>@article{lin2026directuv,
+  title   = {DirectUV: Image-Conditioned UV Texture Generation
+             with Surface-Aware Positional Encoding},
+  author  = {Lin, Jiantao and Xu, Yingjie and Sheng, Mingzhi and
+             Wei, Yangkai and Chen, Hao and Chen, Ying-Cong},
+  journal = {arXiv preprint arXiv:2609.34651},
+  year    = {2026}
+}</code></pre>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <a class="topbar__mark" href="#top">Direct<span>UV</span></a>
+    <p>HKUST (Guangzhou) · HKUST · knowin.ai</p>
+  </div>
+</footer>
+
+<dialog class="lightbox" id="lightbox" aria-label="Enlarged figure">
+  <button class="lightbox__close" type="button" aria-label="Close">Close</button>
+  <div class="lightbox__scroll"><img alt=""></div>
+</dialog>
+
+<script src="static/js/main.js" defer></script>
+</body>
+</html>
